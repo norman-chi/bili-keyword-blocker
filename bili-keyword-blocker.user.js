@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         B站关键词批量拉黑
 // @namespace    https://github.com/norman-chi/bili-keyword-blocker
-// @version      1.1
+// @version      1.2
 // @description  支持首页快速拉黑作者，以及按关键词批量拉黑搜索结果中的博主
 // @author       norman-chi
 // @license      MIT
@@ -19,11 +19,49 @@
 
   // ───────── 样式 ─────────
   GM_addStyle(`
+    #bili-block-entry {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      flex: 0 0 auto;
+      margin-left: 8px;
+      z-index: 99999;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    #bili-block-launcher {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      min-height: 28px;
+      padding: 0 10px;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: #61666d;
+      font-size: 13px;
+      line-height: 28px;
+      white-space: nowrap;
+      cursor: pointer;
+    }
+    #bili-block-launcher:hover,
+    #bili-block-entry.is-open #bili-block-launcher {
+      background: #f1f2f3;
+      color: #fb7299;
+    }
+    #bili-block-launcher .bp-launcher-icon {
+      font-size: 14px;
+      line-height: 1;
+    }
     #bili-block-panel {
-      position: fixed;
-      top: 80px;
-      right: 20px;
+      display: none;
+      position: absolute;
+      top: calc(100% + 8px);
+      right: 0;
       width: 380px;
+      max-width: min(380px, calc(100vw - 32px));
+      max-height: calc(100vh - 140px);
+      overflow-y: auto;
       background: #fff;
       border: 1px solid #ddd;
       border-radius: 8px;
@@ -32,6 +70,7 @@
       font-family: -apple-system, sans-serif;
       font-size: 13px;
     }
+    #bili-block-entry.is-open #bili-block-panel { display: block; }
     #bili-block-panel h3 {
       margin: 0;
       padding: 12px 14px;
@@ -43,7 +82,7 @@
       justify-content: space-between;
       align-items: center;
     }
-    #bili-block-panel h3 span { cursor: pointer; opacity: .8; }
+    #bili-block-panel h3 span { cursor: pointer; opacity: .8; padding: 0 2px; }
     #bili-block-panel h3 span:hover { opacity: 1; }
     #bili-block-panel .body { padding: 12px 14px; }
     #bili-block-panel label { display: block; margin-bottom: 4px; color: #555; }
@@ -162,13 +201,34 @@
       opacity: 0; pointer-events: none; transition: opacity .18s ease;
     }
     #bili-quick-block-toast.show { opacity: 1; }
+    #bili-block-entry.bp-fallback {
+      display: flex;
+      justify-content: flex-end;
+      width: min(1700px, calc(100% - 32px));
+      margin: 12px auto 0;
+    }
+    @media (max-width: 700px) {
+      #bili-block-entry { margin-left: 0; }
+      #bili-block-panel { right: -8px; }
+      #bili-block-launcher { padding: 0 8px; }
+    }
   `);
 
-  // ───────── 面板 HTML ─────────
+  // ───────── 顶部入口与面板 HTML ─────────
+  const entry = document.createElement('div');
+  entry.id = 'bili-block-entry';
+
+  const launcher = document.createElement('button');
+  launcher.id = 'bili-block-launcher';
+  launcher.type = 'button';
+  launcher.title = '关键词批量拉黑';
+  launcher.setAttribute('aria-expanded', 'false');
+  launcher.innerHTML = '<span class="bp-launcher-icon">⊘</span><span>关键词拉黑</span>';
+
   const panel = document.createElement('div');
   panel.id = 'bili-block-panel';
   panel.innerHTML = `
-    <h3>🚫 关键词批量拉黑 <span id="bp-toggle">−</span></h3>
+    <h3>🚫 关键词批量拉黑 <span id="bp-toggle" role="button" aria-label="收起面板">×</span></h3>
     <div class="body" id="bp-body">
       <label>搜索关键词（回车添加多个）</label>
       <input type="text" id="bp-keyword" placeholder="输入关键词，回车添加…" />
@@ -209,7 +269,48 @@
       </div>
     </div>
   `;
-  document.body.appendChild(panel);
+  entry.append(launcher, panel);
+
+  const mountEntry = () => {
+    if (entry.isConnected) return true;
+
+    const channelRight = document.querySelector([
+      '.channel-items__right',
+      '.channel-items-right',
+      '.bili-header__channel .channel-entry-more'
+    ].join(','));
+
+    if (channelRight) {
+      const mountTarget = channelRight.matches('.channel-entry-more')
+        ? channelRight.parentElement
+        : channelRight;
+      mountTarget.appendChild(entry);
+      return true;
+    }
+
+    const channel = document.querySelector('.bili-header__channel, .channel-icons, .channel-items');
+    if (channel) {
+      entry.classList.add('bp-fallback');
+      channel.insertAdjacentElement('afterend', entry);
+      return true;
+    }
+
+    return false;
+  };
+
+  if (!mountEntry()) {
+    const mountObserver = new MutationObserver(() => {
+      if (mountEntry()) mountObserver.disconnect();
+    });
+    mountObserver.observe(document.body, { childList: true, subtree: true });
+    setTimeout(() => {
+      mountObserver.disconnect();
+      if (!entry.isConnected) {
+        entry.classList.add('bp-fallback');
+        document.body.insertAdjacentElement('afterbegin', entry);
+      }
+    }, 5000);
+  }
 
   // ───────── 工具函数 ─────────
   const $ = id => document.getElementById(id);
@@ -254,13 +355,14 @@
     }
   });
 
-  // ───────── 折叠 ─────────
-  $('bp-toggle').onclick = () => {
-    const body = $('bp-body');
-    const collapsed = body.style.display === 'none';
-    body.style.display = collapsed ? '' : 'none';
-    $('bp-toggle').textContent = collapsed ? '−' : '+';
+  // ───────── 展开 / 收起（每次刷新默认收起） ─────────
+  const setPanelOpen = open => {
+    entry.classList.toggle('is-open', open);
+    launcher.setAttribute('aria-expanded', String(open));
   };
+
+  launcher.onclick = () => setPanelOpen(!entry.classList.contains('is-open'));
+  $('bp-toggle').onclick = () => setPanelOpen(false);
 
   $('bp-reset').onclick = () => {
     keywords = [];
