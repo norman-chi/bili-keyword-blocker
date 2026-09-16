@@ -24,34 +24,39 @@
       display: inline-flex;
       align-items: center;
       flex: 0 0 auto;
-      margin-left: 8px;
+      margin-left: 6px;
       z-index: 99999;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    #bili-block-entry-item {
+      display: flex;
+      align-items: center;
+      list-style: none;
     }
     #bili-block-launcher {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      gap: 5px;
-      min-height: 28px;
-      padding: 0 10px;
+      width: 32px;
+      height: 32px;
+      padding: 0;
       border: 0;
-      border-radius: 6px;
-      background: transparent;
-      color: #61666d;
-      font-size: 13px;
-      line-height: 28px;
+      border-radius: 8px;
+      background: #fb7299;
+      color: #fff;
+      font-size: 15px;
+      font-weight: 600;
+      line-height: 32px;
       white-space: nowrap;
       cursor: pointer;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, .12);
+      transition: background-color .15s ease, transform .15s ease;
     }
     #bili-block-launcher:hover,
     #bili-block-entry.is-open #bili-block-launcher {
-      background: #f1f2f3;
-      color: #fb7299;
-    }
-    #bili-block-launcher .bp-launcher-icon {
-      font-size: 14px;
-      line-height: 1;
+      background: #e85b85;
+      color: #fff;
+      transform: translateY(-1px);
     }
     #bili-block-panel {
       display: none;
@@ -210,7 +215,7 @@
     @media (max-width: 700px) {
       #bili-block-entry { margin-left: 0; }
       #bili-block-panel { right: -8px; }
-      #bili-block-launcher { padding: 0 8px; }
+      #bili-block-launcher { width: 30px; height: 30px; line-height: 30px; }
     }
   `);
 
@@ -222,8 +227,9 @@
   launcher.id = 'bili-block-launcher';
   launcher.type = 'button';
   launcher.title = '关键词批量拉黑';
+  launcher.setAttribute('aria-label', '关键词批量拉黑');
   launcher.setAttribute('aria-expanded', 'false');
-  launcher.innerHTML = '<span class="bp-launcher-icon">⊘</span><span>关键词拉黑</span>';
+  launcher.textContent = '黑';
 
   const panel = document.createElement('div');
   panel.id = 'bili-block-panel';
@@ -273,6 +279,21 @@
 
   const mountEntry = () => {
     if (entry.isConnected) return true;
+
+    const bannerLeftNav = document.querySelector([
+      '.bili-header .left-entry',
+      '.bili-header__bar .left-entry',
+      '.bili-header .bili-header__bar > ul:first-child',
+      '.international-header .mini-header__content .nav-link'
+    ].join(','));
+
+    if (bannerLeftNav) {
+      const listItem = document.createElement('li');
+      listItem.id = 'bili-block-entry-item';
+      listItem.appendChild(entry);
+      bannerLeftNav.appendChild(listItem);
+      return true;
+    }
 
     const channelRight = document.querySelector([
       '.channel-items__right',
