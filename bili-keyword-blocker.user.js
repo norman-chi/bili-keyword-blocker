@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         B站关键词批量拉黑
 // @namespace    https://github.com/norman-chi/bili-keyword-blocker
-// @version      1.0
-// @description  搜索关键词，批量拉黑搜索结果中的所有博主（支持视频搜索 + 用户搜索）
+// @version      1.1
+// @description  支持首页快速拉黑作者，以及按关键词批量拉黑搜索结果中的博主
 // @author       norman-chi
 // @license      MIT
 // @homepageURL  https://github.com/norman-chi/bili-keyword-blocker
@@ -134,6 +134,34 @@
       overflow: hidden; text-overflow: ellipsis;
       white-space: nowrap; font-size: 11px;
     }
+    .bili-quick-block-btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      margin-left: 6px; padding: 1px 6px;
+      border: 1px solid #fb7299; border-radius: 4px;
+      background: #fff; color: #fb7299;
+      font-size: 11px; line-height: 18px; white-space: nowrap;
+      cursor: pointer; vertical-align: middle;
+      opacity: 0; visibility: hidden; pointer-events: none;
+      transition: opacity .15s ease, background-color .15s ease, color .15s ease;
+    }
+    .bili-quick-block-card:hover .bili-quick-block-btn,
+    .bili-quick-block-btn:focus-visible {
+      opacity: 1; visibility: visible; pointer-events: auto;
+    }
+    .bili-quick-block-btn:hover { background: #fb7299; color: #fff; }
+    .bili-quick-block-btn:disabled {
+      border-color: #aaa; background: #f5f5f5; color: #888; cursor: wait;
+    }
+    #bili-quick-block-toast {
+      position: fixed; left: 50%; top: 72px; transform: translateX(-50%);
+      z-index: 100000; max-width: min(480px, calc(100vw - 32px));
+      padding: 9px 14px; border-radius: 6px;
+      background: rgba(0,0,0,.78); color: #fff;
+      font-size: 13px; line-height: 1.4; text-align: center;
+      box-shadow: 0 3px 12px rgba(0,0,0,.2);
+      opacity: 0; pointer-events: none; transition: opacity .18s ease;
+    }
+    #bili-quick-block-toast.show { opacity: 1; }
   `);
 
   // ───────── 面板 HTML ─────────
@@ -481,6 +509,143 @@
     if (res.code === 22001) return { ok: true, skipped: true };
     return { ok: false, msg: `code=${res.code} ${res.message}` };
   };
+
+  // ───────── 首页视频卡片快速拉黑 ─────────
+  const homepageCardSelector = [
+    '.bili-video-card',
+    '.feed-card',
+    '.floor-single-card',
+    '.video-card',
+  ].join(',');
+  const hiddenHomepageUids = new Set();
+  let toastTimer = null;
+
+  const isHomepage = () => ['www.bilibili.com', 'bilibili.com'].includes(location.hostname)
+    && location.pathname === '/';
+
+  const showQuickBlockToast = (message) => {
+    let toast = document.getElementById('bili-quick-block-toast');
+    if (!toast) {
+      toast = document.createElement('div');
+      toast.id = 'bili-quick-block-toast';
+      document.body.appendChild(toast);
+    }
+    toast.textContent = message;
+    toast.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toast.classList.remove('show'), 2600);
+  };
+
+  const getUidFromSpaceUrl = (url) => {
+    try {
+      const match = new URL(url, location.href).pathname.match(/^\/(\d+)(?:\/|$)/);
+      return match ? match[1] : '';
+    } catch (_) {
+      return '';
+    }
+  };
+
+  const findCardAuthor = (card) => {
+    const links = [...card.querySelectorAll('a[href*="space.bilibili.com/"]')]
+      .map(link => ({ link, uid: getUidFromSpaceUrl(link.href) }))
+      .filter(item => item.uid);
+    if (links.length === 0) return null;
+
+    // 头像和作者名可能都链向个人空间，优先选取有文字的链接。
+    const author = links.find(item => item.link.textContent.trim()) || links[0];
+    const sameUidWithName = links.find(item => item.uid === author.uid && item.link.textContent.trim());
+    const nameLink = sameUidWithName?.link || author.link;
+    const authorNameElement = nameLink.querySelector('.bili-video-card__info--author');
+    const name = authorNameElement?.getAttribute('title')?.trim()
+      || authorNameElement?.textContent.trim()
+      || nameLink.getAttribute('title')?.trim()
+      || nameLink.textContent.replace(/\s*·\s*[^\n]+$/, '').replace(/\s+/g, ' ').trim()
+      || `UID:${author.uid}`;
+    return { uid: author.uid, name, link: nameLink };
+  };
+
+  const hideHomepageAuthor = (uid) => {
+    document.querySelectorAll(`${homepageCardSelector}`).forEach(card => {
+      const button = card.querySelector(`.bili-quick-block-btn[data-uid="${uid}"]`);
+      if (button) card.style.display = 'none';
+    });
+  };
+
+  const addQuickBlockButton = (card) => {
+    if (!(card instanceof HTMLElement) || card.querySelector('.bili-quick-block-btn')) return;
+    const author = findCardAuthor(card);
+    if (!author) return;
+
+    card.classList.add('bili-quick-block-card');
+    if (hiddenHomepageUids.has(author.uid)) {
+      card.style.display = 'none';
+      return;
+    }
+
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'bili-quick-block-btn';
+    button.dataset.uid = author.uid;
+    button.textContent = '拉黑';
+    button.title = `拉黑作者：${author.name}`;
+    button.setAttribute('aria-label', `拉黑作者 ${author.name}`);
+
+    button.addEventListener('click', async event => {
+      event.preventDefault();
+      event.stopPropagation();
+
+      if (!confirm(`确定拉黑「${author.name}」吗？\n\n拉黑后，当前页面中这位作者的视频会立即隐藏。`)) return;
+
+      const csrf = getCookie('bili_jct');
+      if (!csrf) {
+        showQuickBlockToast('拉黑失败：未找到登录信息，请先登录 B 站');
+        return;
+      }
+
+      button.disabled = true;
+      button.textContent = '拉黑中…';
+      try {
+        const result = await blockOne(author.uid, csrf);
+        if (!result.ok) throw new Error(result.msg);
+        hiddenHomepageUids.add(author.uid);
+        hideHomepageAuthor(author.uid);
+        showQuickBlockToast(result.skipped
+          ? `「${author.name}」已在黑名单，已隐藏相关视频`
+          : `已拉黑「${author.name}」`);
+      } catch (error) {
+        button.disabled = false;
+        button.textContent = '拉黑';
+        showQuickBlockToast(`拉黑「${author.name}」失败：${error.message}`);
+      }
+    });
+
+    author.link.insertAdjacentElement('afterend', button);
+  };
+
+  const scanHomepageCards = (root = document) => {
+    if (!isHomepage()) return;
+    const element = root instanceof Element ? root : root.parentElement;
+    const parentCard = element?.closest?.(homepageCardSelector);
+    if (parentCard) addQuickBlockButton(parentCard);
+    root.querySelectorAll?.(homepageCardSelector).forEach(addQuickBlockButton);
+  };
+
+  if (isHomepage()) {
+    scanHomepageCards();
+    let scanScheduled = false;
+    const pendingRoots = new Set();
+    const observer = new MutationObserver(mutations => {
+      mutations.forEach(mutation => mutation.addedNodes.forEach(node => pendingRoots.add(node)));
+      if (scanScheduled) return;
+      scanScheduled = true;
+      requestAnimationFrame(() => {
+        scanScheduled = false;
+        pendingRoots.forEach(scanHomepageCards);
+        pendingRoots.clear();
+      });
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+  }
 
   // ───────── 拉黑按钮 ─────────
   $('bp-block').onclick = async () => {
