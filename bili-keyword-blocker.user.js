@@ -277,6 +277,10 @@
   `;
   entry.append(launcher, panel);
 
+  const entryItem = document.createElement('li');
+  entryItem.id = 'bili-block-entry-item';
+  entryItem.appendChild(entry);
+
   const mountEntry = () => {
     if (entry.isConnected) return true;
 
@@ -288,12 +292,14 @@
     ].join(','));
 
     if (bannerLeftNav) {
-      const listItem = document.createElement('li');
-      listItem.id = 'bili-block-entry-item';
-      listItem.appendChild(entry);
-      bannerLeftNav.appendChild(listItem);
+      entry.classList.remove('bp-fallback');
+      entryItem.appendChild(entry);
+      bannerLeftNav.appendChild(entryItem);
       return true;
     }
+
+    // 首页频道区是降级位置；视频页等页面没有 Banner 导航时不强行插入。
+    if (location.pathname !== '/') return false;
 
     const channelRight = document.querySelector([
       '.channel-items__right',
@@ -305,6 +311,7 @@
       const mountTarget = channelRight.matches('.channel-entry-more')
         ? channelRight.parentElement
         : channelRight;
+      entry.classList.remove('bp-fallback');
       mountTarget.appendChild(entry);
       return true;
     }
@@ -319,18 +326,24 @@
     return false;
   };
 
-  if (!mountEntry()) {
-    const mountObserver = new MutationObserver(() => {
-      if (mountEntry()) mountObserver.disconnect();
-    });
-    mountObserver.observe(document.body, { childList: true, subtree: true });
-    setTimeout(() => {
-      mountObserver.disconnect();
-      if (!entry.isConnected) {
-        entry.classList.add('bp-fallback');
-        document.body.insertAdjacentElement('afterbegin', entry);
-      }
-    }, 5000);
+  // B 站会在首屏加载及站内跳转时重建导航。延迟、去抖挂载，避免干扰框架水合；
+  // 导航被替换后继续观察并自动恢复按钮，不再直接修改 body 顶层结构。
+  let mountTimer = null;
+  const scheduleMount = (delay = 300) => {
+    if (entry.isConnected || mountTimer !== null) return;
+    mountTimer = setTimeout(() => {
+      mountTimer = null;
+      mountEntry();
+    }, delay);
+  };
+
+  const mountObserver = new MutationObserver(() => scheduleMount());
+  mountObserver.observe(document.documentElement, { childList: true, subtree: true });
+
+  if (document.readyState === 'complete') {
+    scheduleMount(1000);
+  } else {
+    window.addEventListener('load', () => scheduleMount(1000), { once: true });
   }
 
   // ───────── 工具函数 ─────────
