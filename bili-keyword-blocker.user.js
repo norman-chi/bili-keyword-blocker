@@ -282,6 +282,14 @@
   entryItem.appendChild(entry);
 
   const mountEntry = () => {
+    // Banner 入口仅用于首页。视频页导航由 B 站的 Vue 组件独立管理，
+    // 向其中插入节点会破坏组件水合并导致整个顶部导航渲染失败。
+    if (location.pathname !== '/') {
+      entryItem.remove();
+      entry.remove();
+      return false;
+    }
+
     if (entry.isConnected) return true;
 
     const bannerLeftNav = document.querySelector([
@@ -297,9 +305,6 @@
       bannerLeftNav.appendChild(entryItem);
       return true;
     }
-
-    // 首页频道区是降级位置；视频页等页面没有 Banner 导航时不强行插入。
-    if (location.pathname !== '/') return false;
 
     const channelRight = document.querySelector([
       '.channel-items__right',
@@ -337,17 +342,29 @@
     }, delay);
   };
 
-  const mountObserver = new MutationObserver(() => scheduleMount());
+  const syncEntry = () => {
+    if (location.pathname === '/') {
+      scheduleMount();
+    } else if (entry.isConnected) {
+      entryItem.remove();
+      entry.remove();
+    }
+  };
+
+  const mountObserver = new MutationObserver(syncEntry);
   mountObserver.observe(document.documentElement, { childList: true, subtree: true });
 
-  if (document.readyState === 'complete') {
-    scheduleMount(1000);
-  } else {
-    window.addEventListener('load', () => scheduleMount(1000), { once: true });
+  if (location.pathname === '/') {
+    if (document.readyState === 'complete') {
+      scheduleMount(1000);
+    } else {
+      window.addEventListener('load', () => scheduleMount(1000), { once: true });
+    }
   }
 
   // ───────── 工具函数 ─────────
-  const $ = id => document.getElementById(id);
+  // 面板默认处于未挂载状态，事件应直接绑定到面板自身的节点。
+  const $ = id => panel.querySelector(`#${id}`);
   const log = (msg, cls = 'log-info') => {
     const d = $('bp-log');
     const item = document.createElement('div');
